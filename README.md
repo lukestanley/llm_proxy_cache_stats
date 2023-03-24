@@ -19,11 +19,11 @@ Clone this repository and install the dependencies using pip, me hearties:
 
 ```bash
 
-git clone  https://github.com/lukestanley/llm_proxy_cache_stats.git
+git clone https://github.com/lukestanley/llm_proxy_cache_stats.git
 
-cd  llm_proxy_cache_stats
+cd llm_proxy_cache_stats
 
-pip install  -r  requirements.txt
+pip install -r requirements.txt
 
 python cache_openai.py
 
@@ -41,7 +41,7 @@ To run the stats server, use the followin' command, ye scallywags:
 
 ```bash
 
-streamlit run  cache_stats.py
+streamlit run cache_stats.py
 
 ```
 
@@ -56,10 +56,11 @@ The statistics be populated on load, aye.
 ```python
 
 import openai
-
 openai.api_base = "http://localhost:5000/v1"
 
 ```
+
+Aye this be workin' with LangChain too!
 
   
 
