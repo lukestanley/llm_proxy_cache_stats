@@ -6,7 +6,7 @@ from hashlib import sha1
 
 import httpx
 import msgpack
-from quart import Quart, Response, request
+from quart import Quart, Response, request, render_template_string
 
 app = Quart(__name__)
 
@@ -91,6 +91,80 @@ async def proxy(path):
 
     return streamed_response
 
+
+def decode_streamed_http_response(response_data):
+    combined_string = ""
+    chunks = response_data.split("data: ")
+
+    for chunk in chunks:
+        if chunk.strip() == "[DONE]":
+            break
+        if not chunk:
+            continue
+
+        json_data = json.loads(chunk)
+        content=''
+        try:
+            content = json_data['choices'][0]['text']
+        except Exception:
+            content = json_data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+        combined_string += content
+    return combined_string
+
+def decode_input_messages(request_data):
+    request_data = json.loads(request_data)
+    return request_data["messages"]
+
+def display_json_as_table(data):
+    if not data:
+        return ""
+    
+    table_text = "Role\tContent\n\n"
+    
+    for item in data:
+        content = item.get("content")
+        role = item.get("role")
+        table_text += f"{role}\t{content}\n\n"
+    
+    return table_text
+
+@app.route("/stats")
+async def stats():
+    data = []
+    for _, row in cache.items():
+        request_data = json.loads(row["request_data"].decode())
+        messages = request_data.get('messages', None)
+        if messages:
+            messages = display_json_as_table(messages)
+        prompt = request_data.get('prompt',None)
+        response_content = row["content"].decode()
+        data.append({
+            "url": row["url"],
+            "input": messages or prompt[0],
+            "content": decode_streamed_http_response(response_content),
+            "response_length": len(decode_streamed_http_response(response_content))
+        })
+
+    table_template = '''
+    <table>
+        <tr>
+            <th>URL</th>
+            <th>Input</th>
+            <th>Content</th>
+            <th>Response Length</th>
+        </tr>
+        {% for row in data %}
+        <tr>
+            <td>{{ row.url }}</td>
+            <td>{{ row.input }}</td>
+            <td>{{ row.content }}</td>
+            <td>{{ row.response_length }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    '''
+
+    return await render_template_string(table_template, data=data)
 
 if __name__ == "__main__":
     threading.Thread(target=save_cache_periodically, daemon=True).start()
