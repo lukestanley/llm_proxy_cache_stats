@@ -31,7 +31,7 @@ python cache_openai.py
 
   
 
-## The cache be savin' to disk up to every 10 seconds. :hourglass:
+## The cache be savin' to disk up to every 5 seconds. :hourglass:
 
   
 
