@@ -1,0 +1,5 @@
+msgpack
+pandas
+streamlit
+httpx
+quart
