@@ -1,11 +1,4 @@
-
-  
-
-# LLM Proxy Cache Stats :bar_chart: :robot: :floppy_disk: :zap:
-
-  
-
-  
+# LLM Proxy Cache Stats :bar_chart::robot:🧠:floppy_disk:
 
 Ahoy, mateys! LLM Proxy Cache Stats be a Python application that caches requests to the OpenAI API and provides basic analytics on the requests and responses. Inspired by the legendary Helicone, this here treasure be simpler and easier to set up. Arrr! No need for a database, nor Cloudflare.
 
@@ -19,22 +12,21 @@ pip install  -r  requirements.txt
 python cache_openai.py
 ```
 
-## To use the cache, set the API base to the cache server: :compass:
+## :compass: To use the cache, set the API base to the cache server: 
 
 ```python
 import openai
 openai.api_base = "http://localhost:5000/v1"
 ```
  
-## The cache be savin' to disk up to every 5 seconds. :hourglass:
+## :hourglass: The cache be savin' to disk up to every 5 seconds. 
 
 To see ye crazy swashbuckling requests, gander the honest beauty of ye stats dashboard:
 http://localhost:5000/stats
 
 The statistics be updated on ye old fashioned way, by refreshin' the page. :sailboat:
 
-
-### Aye this be workin' with LangChain too!
+### 🦜️🔗 Aye this be workin' with LangChain too!
   
 ```python
 import openai
