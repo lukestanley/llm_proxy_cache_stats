@@ -1,3 +1,4 @@
+import uvicorn
 import json
 import threading
 from hashlib import sha1
@@ -6,9 +7,11 @@ from time import sleep
 
 import httpx
 import msgpack
-from quart import Quart, Response, request, render_template_string
+from starlette.applications import Starlette
+from starlette.responses import Response, StreamingResponse
+from starlette.routing import Route
 
-app = Quart(__name__)
+app = Starlette(debug=True)
 
 OPENAI_API_BASE = "https://api.openai.com/"
 
@@ -41,27 +44,84 @@ def generate_cache_key(url, method, headers, data):
 async def forward_request(url, method, headers, data):
     """Forward the request to the OpenAI API"""
     async with httpx.AsyncClient() as client:
-        print(method)
-        print(url)
         async with client.stream(method, url, headers=headers, data=data) as response:
-            content = await response.aread()
-            return response, content
+            content_type = response.headers.get(
+                "Content-Type", response.headers.get("Media-Type", "application/json")
+            )
+            # we yield the type and status code
+            yield content_type, response.status_code
+            try:
+                async for chunk in response.aiter_bytes():
+                    yield chunk  # Yield the remaining chunks of the response
+            except (httpx.StreamClosed, httpx.ReadTimeout):
+                pass
 
+@app.route("/stats")
+async def stats(request):
+    """Display a table of cached responses with their input and output"""
+    data = []
+    for _, row in cache.items():
+        request_data = json.loads(row["request_data"].decode())
+        messages = request_data.get("messages", None)
+        if messages:
+            messages = format_chat_input(messages)
+        prompt = request_data.get("prompt", None)
+        response_content = row["content"].decode()
+        data.append(
+            {
+                "url": row["url"].replace(OPENAI_API_BASE, ""),
+                "input": messages or prompt[0],
+                "content": decode_streamed_http_response(response_content),
+                "response_length": len(decode_streamed_http_response(response_content)),
+            }
+        )
 
-@app.route(
-    "/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
-)
-async def proxy(path):
+    table_rows = ""
+    for row in data:
+        table_rows += f"""
+        <tr>
+            <td>{row['url']}</td>
+            <td>{row['input']}</td>
+            <td>{row['content']}</td>
+            <td>{row['response_length']}</td>
+        </tr>
+        """
+
+    html = f"""
+    <html>
+        <head>
+            <title>Cached Responses</title>
+        </head>
+        <body>
+            <h1>Cached Responses</h1>
+            <table>
+                <tr>
+                    <th>URL</th>
+                    <th>Input</th>
+                    <th>Content</th>
+                    <th>Response Length</th>
+                </tr>
+                {table_rows}
+            </table>
+        </body>
+    </html>
+    """
+
+    return Response(html, media_type="text/html")
+
+@app.route("/{path:path}", methods=["GET", "POST", "OPTIONS", "HEAD"])
+async def proxy(request):
     """Proxy requests to the OpenAI API and cache the responses."""
     # Get the request data, method, and headers
-    data = await request.get_data()
+    path = request.url.path[1:]
+    data = await request.body()
     method = request.method
     headers = {
         key: value
         for key, value in request.headers.items()
         if key.lower() not in ["host", "content-length"]
     }
-    
+
     # Set the target URL for the OpenAI API
     target_url = f"{OPENAI_API_BASE}{path}"
 
@@ -72,34 +132,31 @@ async def proxy(path):
     if cached_response:
         print("Using cache for:", cache_key)
         return Response(
-            cached_response["content"], content_type=cached_response["content_type"]
+            cached_response["content"], media_type=cached_response["content_type"]
         )
 
     # Forward the request to the OpenAI API
-    response, content = await forward_request(target_url, method, headers, data)
-
-    # Stream the response
-    async def stream_response():
-        async for chunk in response.aiter_bytes():
+    response_chunks = forward_request(target_url, method, headers, data)
+    content_type, status_code = await response_chunks.__anext__()  # Get the content type from the async generator
+    print("content_type:",content_type)
+    print("status_code:",status_code)
+    async def stream_response(response_chunks):
+        chunks = []
+        async for chunk in response_chunks:
+            chunks.append(chunk)
             yield chunk
-
-    content_type = response.headers.get("Content-Type", "application/json")
-    streamed_response = Response(stream_response(), content_type=content_type)
-
-    # Cache successful responses with a status code of 200 OK or 203 Non-Authoritative Information
-    # TODO: Further restrict caches by URL allow or ignore lists
-    if response.status_code in [200, 203]:
-        # Cache the response after the request has finished
+        if status_code != 200:
+            return
+        content = b"".join(chunks)
         cache[cache_key] = {
             "url": target_url,
             "headers": headers,
             "content": content,
             "request_data": data,
             "content_type": content_type,
-            "status_code": response.status_code,
+            "status_code": status_code,  # Assume success
         }
-
-    return streamed_response
+    return StreamingResponse(stream_response(response_chunks), media_type=content_type)
 
 
 def decode_streamed_http_response(response_data):
@@ -121,7 +178,8 @@ def decode_streamed_http_response(response_data):
             content = json_data["choices"][0]["text"]
         except Exception:
             content = (
-                json_data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                json_data.get("choices", [{}])[0].get(
+                    "delta", {}).get("content", "")
             )
         combined_string += content
     return combined_string
@@ -148,47 +206,8 @@ def format_chat_input(data):
     return table_text
 
 
-@app.route("/stats")
-async def stats():
-    """Display a table of cached responses with their input and output"""
-    data = []
-    for _, row in cache.items():
-        request_data = json.loads(row["request_data"].decode())
-        messages = request_data.get("messages", None)
-        if messages:
-            messages = format_chat_input(messages)
-        prompt = request_data.get("prompt", None)
-        response_content = row["content"].decode()
-        data.append(
-            {
-                "url": row["url"],
-                "input": messages or prompt[0],
-                "content": decode_streamed_http_response(response_content),
-                "response_length": len(decode_streamed_http_response(response_content)),
-            }
-        )
-
-    table_template = """
-    <table>
-        <tr>
-            <th>URL</th>
-            <th>Input</th>
-            <th>Content</th>
-            <th>Response Length</th>
-        </tr>
-        {% for row in data %}
-        <tr>
-            <td>{{ row.url }}</td>
-            <td>{{ row.input }}</td>
-            <td>{{ row.content }}</td>
-            <td>{{ row.response_length }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-    """
-    return await render_template_string(table_template, data=data)
 
 
 if __name__ == "__main__":
     threading.Thread(target=save_cache_periodically, daemon=True).start()
-    app.run(debug=True, port=5000)
+    uvicorn.run(app, host="0.0.0.0", port=5000)

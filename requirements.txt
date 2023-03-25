@@ -1,3 +1,4 @@
 msgpack
 httpx
-quart
+starlette
+uvicorn
