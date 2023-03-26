@@ -9,7 +9,6 @@ import httpx
 import msgpack
 from starlette.applications import Starlette
 from starlette.responses import Response, StreamingResponse
-from starlette.routing import Route
 
 app = Starlette(debug=True)
 
