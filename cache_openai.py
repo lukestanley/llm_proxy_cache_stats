@@ -1,5 +1,4 @@
 import uvicorn
-import json
 import threading
 from hashlib import sha1
 from pathlib import Path
@@ -9,6 +8,8 @@ import httpx
 import msgpack
 from starlette.applications import Starlette
 from starlette.responses import Response, StreamingResponse
+
+from ui_utils import  stats_template
 
 app = Starlette(debug=True)
 
@@ -58,55 +59,9 @@ async def forward_request(url, method, headers, data):
 @app.route("/stats")
 async def stats(request):
     """Display a table of cached responses with their input and output"""
-    data = []
-    for _, row in cache.items():
-        request_data = json.loads(row["request_data"].decode())
-        messages = request_data.get("messages", None)
-        if messages:
-            messages = format_chat_input(messages)
-        prompt = request_data.get("prompt", None)
-        response_content = row["content"].decode()
-        data.append(
-            {
-                "url": row["url"].replace(OPENAI_API_BASE, ""),
-                "input": messages or prompt[0],
-                "content": decode_streamed_http_response(response_content),
-                "response_length": len(decode_streamed_http_response(response_content)),
-            }
-        )
-
-    table_rows = ""
-    for row in data:
-        table_rows += f"""
-        <tr>
-            <td>{row['url']}</td>
-            <td>{row['input']}</td>
-            <td>{row['content']}</td>
-            <td>{row['response_length']}</td>
-        </tr>
-        """
-
-    html = f"""
-    <html>
-        <head>
-            <title>Cached Responses</title>
-        </head>
-        <body>
-            <h1>Cached Responses</h1>
-            <table>
-                <tr>
-                    <th>URL</th>
-                    <th>Input</th>
-                    <th>Content</th>
-                    <th>Response Length</th>
-                </tr>
-                {table_rows}
-            </table>
-        </body>
-    </html>
-    """
-
+    html = stats_template(cache, OPENAI_API_BASE)
     return Response(html, media_type="text/html")
+
 
 @app.route("/{path:path}", methods=["GET", "POST", "OPTIONS", "HEAD"])
 async def proxy(request):
@@ -153,58 +108,10 @@ async def proxy(request):
             "content": content,
             "request_data": data,
             "content_type": content_type,
-            "status_code": status_code,  # Assume success
+            "status_code": status_code,
+            "method": method,
         }
     return StreamingResponse(stream_response(response_chunks), media_type=content_type)
-
-
-def decode_streamed_http_response(response_data):
-    """Decode the streamed HTTP response of text or chat response streams"""
-
-    combined_string = ""
-    chunks = response_data.split("data: ")
-
-    for chunk in chunks:
-        if chunk.strip() == "[DONE]":
-            break
-        if not chunk:
-            continue
-
-        json_data = json.loads(chunk)
-        content = ""
-        # Try to extract chunks of text, but fall back to chat:
-        try:
-            content = json_data["choices"][0]["text"]
-        except Exception:
-            content = (
-                json_data.get("choices", [{}])[0].get(
-                    "delta", {}).get("content", "")
-            )
-        combined_string += content
-    return combined_string
-
-
-def decode_input_messages(request_data):
-    """Decode the input messages from the request data"""
-    request_data = json.loads(request_data)
-    return request_data["messages"]
-
-
-def format_chat_input(data):
-    """Format the messages input for the stats page"""
-    if not data:
-        return ""
-
-    table_text = "Role\tContent\n\n"
-
-    for item in data:
-        content = item.get("content")
-        role = item.get("role")
-        table_text += f"{role}\t{content}\n\n"
-
-    return table_text
-
-
 
 
 if __name__ == "__main__":
