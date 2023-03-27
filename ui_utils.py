@@ -49,7 +49,10 @@ def stats_template(cache={}, OPENAI_API_BASE="https://api.openai.com/v1"):
     data = []
     total_request_costings_estimate = 0
     for _, row in cache.items():
-        request_data = json.loads(row["request_data"].decode())
+        try:
+            request_data = json.loads(row["request_data"].decode())
+        except json.decoder.JSONDecodeError:
+            continue
         messages = request_data.get("messages", None)
         if messages:
             messages = format_chat_input(messages)
