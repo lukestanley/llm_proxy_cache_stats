@@ -51,7 +51,7 @@ def stats_template(cache={}, OPENAI_API_BASE="https://api.openai.com/v1"):
     for _, row in cache.items():
         try:
             request_data = json.loads(row["request_data"].decode())
-        except json.decoder.JSONDecodeError:
+        except (json.decoder.JSONDecodeError, UnicodeDecodeError):
             continue
         messages = request_data.get("messages", None)
         if messages:
